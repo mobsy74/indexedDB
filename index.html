@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script type="text/javascript" src="./jquery.min.js"></script>
+    <script type="text/javascript" src="./indexeddb.shim.min.js"></script>
+    <script type="text/javascript">
+
+        var ciudades, startClearData, stopClearData, clearDataInterval, startInsertData, stopInsertData, insertDataInterval, startRetrieveData, stopRetrieveData, retrieveDataInterval;
+
+        var IDBSetting = {
+            name: "indexedDBName",
+            version: 1,
+            tables: [{
+                tableName: "ciudades",
+                keyPath: "seq",
+                autoIncrement: true,
+                index: ["ciudad", "latitud", "longitud"],
+                unique: [false, false, false]
+            }]
+        };
+
+
+        $(window).load(function() {
+            $('#loading').hide();
+        });
+
+        //Initialize the database - called on page load
+        //=====================================
+        ! function() {
+//            console.log("indexeDB init");
+
+            var req = indexedDB.open(IDBSetting.name, IDBSetting.version);
+
+            req.onsuccess = function(event) {
+//                console.log("indexedDB open success");
+            };
+
+            req.onerror = function(event) {
+                console.log("indexedDB open failure");
+            };
+
+            //callback run init or versionUp
+            req.onupgradeneeded = function(event) {
+                console.log("init onupgradeneeded indexedDB ");
+                var db = event.target.result;
+
+                for (var i in IDBSetting.tables) {
+                    var OS = db.createObjectStore(IDBSetting.tables[i].tableName, {
+                        keyPath: IDBSetting.tables[i].keyPath,
+                        autoIncrement: IDBSetting.tables[i].autoIncrement
+                    });
+
+                    for (var j in IDBSetting.tables[i].index) {
+                        OS.createIndex(IDBSetting.tables[i].index[j], IDBSetting.tables[i].index[j], {
+                            unique: IDBSetting.tables[i].unique[j]
+                        });
+                    }
+                }
+            }
+        }();
+
+
+
+        // Adding data to database
+        //=====================================
+        var IDBFuncSet = {
+            //write
+            addData: function(table, data, onLastRecord, count) {
+                var req = indexedDB.open(IDBSetting.name, IDBSetting.version);
+
+                req.onsuccess = function(event) {
+                    try {
+//                        console.log("addData indexedDB open success");
+                        var db = req.result;
+                        var transaction = db.transaction([table], "readwrite");
+                        var objectStore = transaction.objectStore(table);
+                        var objectStoreRequest = objectStore.add(data);
+                    } catch (e) {
+                        console.log("addDataFunction table or data null error");
+                        console.log(e);
+                    }
+
+                    objectStoreRequest.onsuccess = function(event) {
+                        //console.log("Call data Insert success");
+                        if (onLastRecord){
+                            console.log ("Added " + count + " data items to the database.  Now we will retrieve them.");
+                            logTime();
+                            stopInsertData = +new Date();
+                            startRetrieveData = stopInsertData;
+                            insertDataInterval = stopInsertData - startInsertData;
+                            $('#insert').text("Time to insert data: " + insertDataInterval + " milliseconds.");
+                            var ciudadesArr = [];
+                            IDBFuncSet.getAllData(ciudadesArr, "ciudades");
+                        }
+                    };
+
+                    objectStoreRequest.onerror = function(event) {
+                        console.log("addData error");
+                    }
+                };
+
+                req.onerror = function(event) {
+                    console.log("addData indexed DB open failure");
+                };
+            }
+        };
+
+
+
+        // Retrieving data from database
+        //=====================================
+        IDBFuncSet.getAllData = function(arr, table) {
+            try {
+                var req = indexedDB.open(IDBSetting.name, IDBSetting.version);
+
+                req.onsuccess = function(event) {
+                    var db = req.result;
+                    var transaction = db.transaction([table], "readonly");
+                    var objectStore = transaction.objectStore(table);
+
+                    var objectStoreRequest = objectStore.openCursor();
+
+                    objectStoreRequest.onsuccess = function(event) {
+                        var cursor = event.target.result;
+                        if (cursor) {
+                            arr.push(cursor.value);
+                            cursor.continue();
+                        } else {
+                            console.log("Retrieved a data array with " + arr.length + " items in it!");
+                            console.log("Item 1: ");
+                            console.log(arr[0]);
+                            console.log("Item " + arr.length + ": ");
+                            console.log(arr[(arr.length-1)]);
+                            logTime();
+                            stopRetrieveData = +new Date();
+                            retrieveDataInterval = stopRetrieveData - startRetrieveData;
+                            $('#retrieve').text("Time to retrieve data: " + retrieveDataInterval + " milliseconds.");
+                            $("#status").text("Successfully loaded " + arr.length + " items from the JSON file into indexedDB!");
+                            $('#loading').hide();
+                        }
+                    }
+                };
+                req.onerror = function(event) {
+                    console.log("getAllData indexed DB open failure");
+                };
+            } catch (e) {
+                console.log(e);
+            }
+        };
+
+
+        // Read data from file and insert into database
+        //=====================================
+        function getData(file){
+            var json = (function () {
+                var json = null;
+                $.ajax({
+                    'async': false,
+                    'global': false,
+                    'url': file,
+                    'dataType': "json",
+                    'success': function (data) {
+                        json = data;
+
+                        ciudades = json.ciudades;
+
+                        var count = 0;
+                        for(var i in ciudades){
+                            count++;
+                            var onLastRecord = false;
+                            if (count == ciudades.length){
+                                onLastRecord = true;
+                            }
+                            IDBFuncSet.addData("ciudades",ciudades[i], onLastRecord, count);
+                        }
+                    }
+                });
+                return json;
+            })();
+        }
+
+
+        // Clear out existing table and then repopulate with latest data from file
+        //=====================================
+        function resetData(file) {
+            var req = indexedDB.open(IDBSetting.name, IDBSetting.version);
+
+            req.onsuccess = function(event) {
+                var db = req.result;
+
+                // open a read/write db transaction, ready for clearing the data
+                var transaction = db.transaction(["ciudades"], "readwrite");
+
+                // report on the success of opening the transaction
+                transaction.oncomplete = function(event) {
+//                    console.log("Transaction completed: database modification finished.");
+                };
+
+
+                transaction.onerror = function(event) {
+                    console.log("Transaction not opened due to error: ' + transaction.error");
+                };
+
+                // create an object store on the transaction
+                var objectStore = transaction.objectStore("ciudades");
+
+                // clear all the data out of the object store
+                var objectStoreRequest = objectStore.clear();
+
+                objectStoreRequest.onsuccess = function(event) {
+                    // report the success of our clear operation
+                    console.log("Data cleared.");
+
+                    stopClearData = +new Date();
+                    startInsertData = stopClearData;
+                    clearDataInterval = stopClearData - startClearData;
+                    $('#clear').text("Time to clear data: " + clearDataInterval + " milliseconds.");
+                    getData(file);
+                };
+            };
+            req.onerror = function(event) {
+                console.log("clear data failure");
+            };
+        }
+
+
+        function logTime(){
+            console.log("Curent time: " + new Date().toLocaleString());
+        }
+
+        function fetchData(file) {
+            $('#loading').show();
+            console.log ("fetching data...");
+            $('#status').text('Please wait while the data is loaded from the file system...');
+            resetTimerText();
+            logTime();
+            startClearData = +new Date();
+            resetData(file);
+        }
+
+        function resetTimerText(){
+            $('#clear').text("Time to clear data: ");
+            $('#insert').text("Time to insert data: ");
+            $('#retrieve').text("Time to retrieve data: ");
+        }
+
+
+    </script>
+
+</head>
+<body>
+
+<p id="status">Click the button to fetch JSON data.</p>
+
+<div id="loading">
+    <img id="loading-image" src="./spinner.gif" alt="Loading..." />
+</div>
+
+<p id="clear">Time to clear data: </p>
+<p id="insert">Time to insert data: </p>
+<p id="retrieve">Time to retrieve data: </p>
+
+<button onclick="fetchData('data-10000.json')">Fetch 10,000 records</button>
+<br><br>
+<button onclick="fetchData('data-20000.json')">Fetch 20,000 records</button>
+<br><br>
+<button onclick="fetchData('data-30000.json')">Fetch 30,000 records</button>
+<br><br>
+
+<p>
+    Single example record:<br><br>
+    {<br>
+    "ciudad":"Asuncion",<br>
+    "latitud":-25.2985296,<br>
+    "longitud":-57.6710677<br>
+    }<br>
+</p>
+</body>
+</html>
