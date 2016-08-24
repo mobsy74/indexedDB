@@ -1,0 +1,29 @@
+{
+  "ciudades":[
+    {
+      "ciudad":"Asuncion",
+      "latitud":-25.2985296,
+      "longitud":-57.6710677
+    },
+    {
+      "ciudad":"Caaguazu",
+      "latitud":-25.465034,
+      "longitud":-56.0183859
+    },
+    {
+      "ciudad":"Ciudad del Este",
+      "latitud":-25.4933441,
+      "longitud":-54.6710438
+    },
+     {
+      "ciudad":"San Pedro",
+      "latitud":-24.1586759,
+      "longitud":-56.636503
+    },
+     {
+      "ciudad":"Pedro Juan Caballero",
+      "latitud":-22.5450875,
+      "longitud":-55.7618963
+    }
+  ]
+}

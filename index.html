@@ -5,20 +5,23 @@
     <script type="text/javascript" src="./indexeddb.shim.min.js"></script>
     <script type="text/javascript">
 
-        var ciudades,
-                startClearData, stopClearData, clearDataInterval,
-                startInsertData, stopInsertData, insertDataInterval,
-                startRetrieveData, stopRetrieveData, retrieveDataInterval;
+        var startClearData, stopClearData, clearDataInterval,
+            startInsertData, stopInsertData, insertDataInterval,
+            startRetrieveData, stopRetrieveData, retrieveDataInterval;
 
+        var loadingLastTable = false;
+        var loadingLastRecord = false;
+
+        // This object's "tables" property is now dynamically generated in the getData function and is left here only for reference
         var IDBSetting = {
             name: "indexedDBName",
             version: 1,
             tables: [{
-                tableName: "ciudades",
+                tableName: "genericTableName",
                 keyPath: "seq",
                 autoIncrement: true,
-                index: ["ciudad", "latitud", "longitud"],
-                unique: [false, false, false]
+                index: ["column1", "column2"],
+                unique: [false, false]
             }]
         };
 
@@ -27,15 +30,68 @@
             $('#loading').hide();
         });
 
-        //Initialize the database - called on page load
+
+        // Read data from file and insert into database
         //=====================================
-        ! function() {
-//            console.log("indexeDB init");
+        function getData(file){
+            $('#loading').show();
+            console.log ("fetching data...");
+            $('#status').text('Please wait while the data is loaded from the file system...');
+            resetInsertText();
+            logTime();
+
+            $.ajax({
+                'async': false,
+                'global': false,
+                'url': file,
+                'dataType': "json",
+                'success': function (data) {
+                    var schema = [];
+                    var tables = Object.keys(data);
+                    for (tableIndex in tables){
+                        if (tables.hasOwnProperty(tableIndex)) {
+                            var tableName = tables[tableIndex];
+                            var columns = Object.keys(data[tableName][0]);
+                            var unique = [];
+                            for (var i = 0; i < columns.length; i++) {
+                                unique.push(false);
+                            }
+                            var table = {
+                                "tableName": tableName,
+                                keyPath: "seq",
+                                autoIncrement: true,
+                                index: columns,
+                                unique: unique
+                            };
+                            schema.push(table);
+                        }
+                    }
+                    IDBSetting.tables = schema;
+
+                    initializeDatabase(data);
+                }
+            });
+
+        }
+
+
+        // Initialize the database
+        //=====================================
+        function initializeDatabase(data) {
+            startClearData = +new Date();
+            console.log("indexeDB init");
+
+            deleteDatabase();
 
             var req = indexedDB.open(IDBSetting.name, IDBSetting.version);
 
             req.onsuccess = function(event) {
-//                console.log("indexedDB open success");
+                console.log("indexedDB open success");
+                stopClearData = +new Date();
+                clearDataInterval = stopClearData - startClearData;
+                $('#clear').text("Time to clear data: " + clearDataInterval + " milliseconds.");
+
+                loadDatabase(data);
             };
 
             req.onerror = function(event) {
@@ -60,14 +116,43 @@
                     }
                 }
             }
-        }();
+        }
+
+
+        function deleteDatabase(){
+            var DBDeleteRequest = window.indexedDB.deleteDatabase(IDBSetting.name);
+
+            DBDeleteRequest.onerror = function(event) {
+                console.log("Error deleting database.");
+            };
+
+            DBDeleteRequest.onsuccess = function(event) {
+                console.log("Database deleted successfully");
+            };
+        }
+
+
+        function loadDatabase(data){
+            var count = 0;
+            startInsertData = +new Date();
+            for (var i = 0; i < IDBSetting.tables.length; i++){
+                count++;
+                if (count == IDBSetting.tables.length) {
+                    loadingLastTable = true;
+                }
+                loadingLastRecord = false;
+                IDBFuncSet.loadTable(IDBSetting.tables[i].tableName, data[IDBSetting.tables[i].tableName]);
+            }
+        }
 
 
         // Adding data to database
         //=====================================
         var IDBFuncSet = {
             //write
-            addData: function(table, dataArray) {
+            loadTable: function(table, dataArray) {
+                console.log("Loading table: " + table);
+                console.log("loadingLastTable: " + loadingLastTable);
 
                 var req = indexedDB.open(IDBSetting.name, IDBSetting.version);
                 req.onsuccess = function(event) {
@@ -80,9 +165,8 @@
                         var count = 0;
                         for(var i in dataArray) {
                             count++;
-                            var onLastRecord = false;
                             if (count == dataArray.length) {
-                                onLastRecord = true;
+                                loadingLastRecord = true;
                             }
                             var objectStoreRequest = objectStore.add(dataArray[i]);
                         }
@@ -93,15 +177,15 @@
 
                     objectStoreRequest.onsuccess = function(event) {
                         //console.log("Call data Insert success");
-                        if (onLastRecord){
-                            console.log ("Added " + count + " data items to the database.  Now we will retrieve them.");
+                        if (loadingLastTable && loadingLastRecord){
+                            console.log ("Added " + count + " data items to the database table '" + table + "'.");
                             logTime();
                             stopInsertData = +new Date();
-                            startRetrieveData = stopInsertData;
                             insertDataInterval = stopInsertData - startInsertData;
                             $('#insert').text("Time to insert data: " + insertDataInterval + " milliseconds.");
-                            var ciudadesArr = [];
-                            IDBFuncSet.getAllData(ciudadesArr, "ciudades");
+                            $('#loading').hide();
+                            $('#status').text('Data loaded successfully.');
+
                         }
                     };
 
@@ -117,9 +201,20 @@
         };
 
 
+        function retrieveData(){
+            startRetrieveData = +new Date();
+            resetRetrieveText();
+            $('#loading').show();
+            $('#status').text('Please wait while the data is retrieved from the database...');
+            var table = IDBSetting.tables[0].tableName;
+            var tableDataArr = [];
+            IDBFuncSet.retrieveTableData(tableDataArr, table);
+        }
+
+
         // Retrieving data from database
         //=====================================
-        IDBFuncSet.getAllData = function(arr, table) {
+        IDBFuncSet.retrieveTableData = function(arr, table) {
             try {
                 var req = indexedDB.open(IDBSetting.name, IDBSetting.version);
 
@@ -136,7 +231,7 @@
                             arr.push(cursor.value);
                             cursor.continue();
                         } else {
-                            console.log("Retrieved a data array with " + arr.length + " items in it!");
+                            console.log("Retrieved a data array with " + arr.length + " items in it.");
                             console.log("Item 1: ");
                             console.log(arr[0]);
                             console.log("Item " + arr.length + ": ");
@@ -145,13 +240,13 @@
                             stopRetrieveData = +new Date();
                             retrieveDataInterval = stopRetrieveData - startRetrieveData;
                             $('#retrieve').text("Time to retrieve data: " + retrieveDataInterval + " milliseconds.");
-                            $("#status").text("Successfully loaded " + arr.length + " items from the JSON file into indexedDB!");
+                            $("#status").text("Successfully retrieved " + arr.length + " items from the indexedDB database.");
                             $('#loading').hide();
                         }
                     }
                 };
                 req.onerror = function(event) {
-                    console.log("getAllData indexed DB open failure");
+                    console.log("retrieveTableData indexed DB open failure");
                 };
             } catch (e) {
                 console.log(e);
@@ -159,89 +254,18 @@
         };
 
 
-        // Read data from file and insert into database
-        //=====================================
-        function getData(file){
-            var json = (function () {
-                var json = null;
-                $.ajax({
-                    'async': false,
-                    'global': false,
-                    'url': file,
-                    'dataType': "json",
-                    'success': function (data) {
-                        json = data;
-
-                        ciudades = json.ciudades;
-
-                        IDBFuncSet.addData("ciudades", ciudades);
-                    }
-                });
-                return json;
-            })();
-        }
-
-
-        // Clear out existing table and then repopulate with latest data from file
-        //=====================================
-        function resetData(file) {
-            var req = indexedDB.open(IDBSetting.name, IDBSetting.version);
-
-            req.onsuccess = function(event) {
-                var db = req.result;
-
-                // open a read/write db transaction, ready for clearing the data
-                var transaction = db.transaction(["ciudades"], "readwrite");
-
-                // report on the success of opening the transaction
-                transaction.oncomplete = function(event) {
-//                    console.log("Transaction completed: database modification finished.");
-                };
-
-                transaction.onerror = function(event) {
-                    console.log("Transaction not opened due to error: ' + transaction.error");
-                };
-
-                // create an object store on the transaction
-                var objectStore = transaction.objectStore("ciudades");
-
-                // clear all the data out of the object store
-                var objectStoreRequest = objectStore.clear();
-
-                objectStoreRequest.onsuccess = function(event) {
-                    // report the success of our clear operation
-                    console.log("Data cleared.");
-
-                    stopClearData = +new Date();
-                    startInsertData = stopClearData;
-                    clearDataInterval = stopClearData - startClearData;
-                    $('#clear').text("Time to clear data: " + clearDataInterval + " milliseconds.");
-                    getData(file);
-                };
-            };
-            req.onerror = function(event) {
-                console.log("clear data failure");
-            };
-        }
-
-
         function logTime(){
             console.log("Curent time: " + new Date().toLocaleString());
         }
 
-        function fetchData(file) {
-            $('#loading').show();
-            console.log ("fetching data...");
-            $('#status').text('Please wait while the data is loaded from the file system...');
-            resetTimerText();
-            logTime();
-            startClearData = +new Date();
-            resetData(file);
-        }
 
-        function resetTimerText(){
+        function resetInsertText(){
             $('#clear').text("Time to clear data: ");
             $('#insert').text("Time to insert data: ");
+            $('#retrieve').text("Time to retrieve data: ");
+        }
+
+        function resetRetrieveText(){
             $('#retrieve').text("Time to retrieve data: ");
         }
 
@@ -250,7 +274,7 @@
 </head>
 <body>
 
-<p id="status">Click the button to fetch JSON data.</p>
+<h2 id="status">Click a button below to fetch JSON data.</h2>
 
 <div id="loading">
     <img id="loading-image" src="./spinner.gif" alt="Loading..." />
@@ -260,24 +284,23 @@
 <p id="insert">Time to insert data: </p>
 <p id="retrieve">Time to retrieve data: </p>
 
-<button onclick="fetchData('data-10000.json')">Fetch 10,000 records</button>
+<button onclick="getData('data-10000.json')">Load 10,000 records</button>
 <br><br>
-<button onclick="fetchData('data-20000.json')">Fetch 20,000 records</button>
+<button onclick="getData('data-20000.json')">Load 20,000 records</button>
 <br><br>
-<button onclick="fetchData('data-30000.json')">Fetch 30,000 records</button>
+<button onclick="getData('data-30000.json')">Load 30,000 records</button>
 <br><br>
-<button onclick="fetchData('data-120000.json')">Fetch 120,000 records</button>
+<button onclick="getData('data-120000.json')">Load 120,000 records</button>
 <br><br>
-<button onclick="fetchData('data-10000-english.json')">Fetch 10,000 english records</button>
+<button onclick="getData('data-10000-english.json')">Load 10,000 records (English Schema)</button>
+<br><br>
+
+<br><br>
+<button onclick="retrieveData()">Retrieve data from database</button>
 <br><br>
 
 <p>
-    Single example record:<br><br>
-    {<br>
-    "ciudad":"Asuncion",<br>
-    "latitud":-25.2985296,<br>
-    "longitud":-57.6710677<br>
-    }<br>
+    <a href="data-5.json" target="blank">View small example data set</a>
 </p>
 </body>
 </html>
